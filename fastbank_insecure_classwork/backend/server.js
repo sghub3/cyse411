@@ -4,14 +4,21 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
+const RateLimit = require("express-rate-limit");
 
 const app = express();
-const csrf = require('lusca').csrf;
+const csrf = require("lusca").csrf;
 
-// --- BASIC CORS (clean, not vulnerable) ---
+const limiter = RateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+});
+
+app.use(limiter);
+
 app.use(
   cors({
-   origin: ["http://localhost:3001", "http://127.0.0.1:3001"],
+    origin: ["http://localhost:3001", "http://127.0.0.1:3001"],
     credentials: true
   })
 );
@@ -20,7 +27,6 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(csrf());
 
-// --- IN-MEMORY SQLITE DB (clean) ---
 const db = new sqlite3.Database(":memory:");
 
 db.serialize(() => {
@@ -59,7 +65,6 @@ db.serialize(() => {
   db.run(`INSERT INTO transactions (user_id, amount, description) VALUES (1, 100, 'Groceries')`);
 });
 
-// --- SESSION STORE (simple, predictable token exactly like assignment) ---
 const sessions = {};
 
 function fastHash(pwd) {
@@ -73,11 +78,6 @@ function auth(req, res, next) {
   next();
 }
 
-// ------------------------------------------------------------
-// Q4 — AUTH ISSUE 1 & 2: SHA256 fast hash + SQLi in username.
-// Q4 — AUTH ISSUE 3: Username enumeration.
-// Q4 — AUTH ISSUE 4: Predictable sessionId.
-// ------------------------------------------------------------
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
 
@@ -91,28 +91,20 @@ app.post("/login", (req, res) => {
       return res.status(401).json({ error: "Wrong password" });
     }
 
-    const sid = `${username}-${Date.now()}`; // predictable
+    const sid = `${username}-${Date.now()}`;
     sessions[sid] = { userId: user.id };
 
-    // Cookie is intentionally “normal” (not HttpOnly / secure)
     res.cookie("sid", sid, {});
-
     res.json({ success: true });
   });
 });
 
-// ------------------------------------------------------------
-// /me — clean route, no vulnerabilities
-// ------------------------------------------------------------
 app.get("/me", auth, (req, res) => {
   db.get(`SELECT username, email FROM users WHERE id = ${req.user.id}`, (err, row) => {
     res.json(row);
   });
 });
 
-// ------------------------------------------------------------
-// Q1 — SQLi in transaction search
-// ------------------------------------------------------------
 app.get("/transactions", auth, (req, res) => {
   const q = req.query.q || "";
   const sql = `
@@ -125,9 +117,6 @@ app.get("/transactions", auth, (req, res) => {
   db.all(sql, (err, rows) => res.json(rows));
 });
 
-// ------------------------------------------------------------
-// Q2 — Stored XSS + SQLi in feedback insert
-// ------------------------------------------------------------
 app.post("/feedback", auth, (req, res) => {
   const comment = req.body.comment;
   const userId = req.user.id;
@@ -151,9 +140,6 @@ app.get("/feedback", auth, (req, res) => {
   });
 });
 
-// ------------------------------------------------------------
-// Q3 — CSRF + SQLi in email update
-// ------------------------------------------------------------
 app.post("/change-email", auth, (req, res) => {
   const newEmail = req.body.email;
 
@@ -167,7 +153,7 @@ app.post("/change-email", auth, (req, res) => {
   });
 });
 
-// ------------------------------------------------------------
 app.listen(4000, () =>
   console.log("FastBank Version A backend running on http://localhost:4000")
 );
+
