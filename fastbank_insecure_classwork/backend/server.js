@@ -6,7 +6,7 @@ const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
 
 const app = express();
-csrf = require('lusca').csrf;
+const csrf = require('lusca').csrf;
 
 // --- BASIC CORS (clean, not vulnerable) ---
 app.use(
