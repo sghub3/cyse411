@@ -5,6 +5,7 @@ const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
 const RateLimit = require("express-rate-limit");
+const bcrypt = require("bcrypt");
 
 const app = express();
 const csrf = require("lusca").csrf;
@@ -56,7 +57,7 @@ db.serialize(() => {
     );
   `);
 
-  const passwordHash = crypto.createHash("sha256").update("password123").digest("hex");
+  const passwordHash = bcrypt.hashSync("password123", 10);
 
   db.run(
     `INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)`,
@@ -75,10 +76,6 @@ db.serialize(() => {
 
 const sessions = {};
 
-function fastHash(pwd) {
-  return crypto.createHash("sha256").update(pwd).digest("hex");
-}
-
 function auth(req, res, next) {
   const sid = req.cookies.sid;
   if (!sid || !sessions[sid]) return res.status(401).json({ error: "Not authenticated" });
@@ -92,13 +89,11 @@ app.post("/login", (req, res) => {
   db.get(
     `SELECT id, username, password_hash FROM users WHERE username = ?`,
     [username],
-    (err, user) => {
+    async (err, user) => {
       if (!user) return res.status(404).json({ error: "Unknown username" });
 
-      const candidate = fastHash(password);
-      if (candidate !== user.password_hash) {
-        return res.status(401).json({ error: "Wrong password" });
-      }
+      const ok = await bcrypt.compare(password, user.password_hash);
+      if (!ok) return res.status(401).json({ error: "Wrong password" });
 
       const sid = `${username}-${Date.now()}`;
       sessions[sid] = { userId: user.id };
@@ -176,11 +171,6 @@ app.post("/change-email", auth, (req, res) => {
     }
   );
 });
-
-app.listen(4000, () =>
-  console.log("FastBank Version A backend running on http://localhost:4000")
-);
-
 
 app.listen(4000, () =>
   console.log("FastBank Version A backend running on http://localhost:4000")
