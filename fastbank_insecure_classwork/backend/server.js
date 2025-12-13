@@ -58,11 +58,19 @@ db.serialize(() => {
 
   const passwordHash = crypto.createHash("sha256").update("password123").digest("hex");
 
-  db.run(`INSERT INTO users (username, password_hash, email)
-          VALUES ('alice', '${passwordHash}', 'alice@example.com');`);
+  db.run(
+    `INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)`,
+    ["alice", passwordHash, "alice@example.com"]
+  );
 
-  db.run(`INSERT INTO transactions (user_id, amount, description) VALUES (1, 25.50, 'Coffee shop')`);
-  db.run(`INSERT INTO transactions (user_id, amount, description) VALUES (1, 100, 'Groceries')`);
+  db.run(
+    `INSERT INTO transactions (user_id, amount, description) VALUES (?, ?, ?)`,
+    [1, 25.5, "Coffee shop"]
+  );
+  db.run(
+    `INSERT INTO transactions (user_id, amount, description) VALUES (?, ?, ?)`,
+    [1, 100, "Groceries"]
+  );
 });
 
 const sessions = {};
@@ -81,63 +89,78 @@ function auth(req, res, next) {
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
 
-  const sql = `SELECT id, username, password_hash FROM users WHERE username = '${username}'`;
+  db.get(
+    `SELECT id, username, password_hash FROM users WHERE username = ?`,
+    [username],
+    (err, user) => {
+      if (!user) return res.status(404).json({ error: "Unknown username" });
 
-  db.get(sql, (err, user) => {
-    if (!user) return res.status(404).json({ error: "Unknown username" });
+      const candidate = fastHash(password);
+      if (candidate !== user.password_hash) {
+        return res.status(401).json({ error: "Wrong password" });
+      }
 
-    const candidate = fastHash(password);
-    if (candidate !== user.password_hash) {
-      return res.status(401).json({ error: "Wrong password" });
+      const sid = `${username}-${Date.now()}`;
+      sessions[sid] = { userId: user.id };
+
+      res.cookie("sid", sid, {});
+      res.json({ success: true });
     }
-
-    const sid = `${username}-${Date.now()}`;
-    sessions[sid] = { userId: user.id };
-
-    res.cookie("sid", sid, {});
-    res.json({ success: true });
-  });
+  );
 });
 
 app.get("/me", auth, (req, res) => {
-  db.get(`SELECT username, email FROM users WHERE id = ${req.user.id}`, (err, row) => {
-    res.json(row);
-  });
+  db.get(
+    `SELECT username, email FROM users WHERE id = ?`,
+    [req.user.id],
+    (err, row) => {
+      res.json(row);
+    }
+  );
 });
 
 app.get("/transactions", auth, (req, res) => {
-  const q = req.query.q || "";
-  const sql = `
+  const q = `%${req.query.q || ""}%`;
+  db.all(
+    `
     SELECT id, amount, description
     FROM transactions
-    WHERE user_id = ${req.user.id}
-      AND description LIKE '%${q}%'
+    WHERE user_id = ?
+      AND description LIKE ?
     ORDER BY id DESC
-  `;
-  db.all(sql, (err, rows) => res.json(rows));
+    `,
+    [req.user.id, q],
+    (err, rows) => res.json(rows)
+  );
 });
 
 app.post("/feedback", auth, (req, res) => {
   const comment = req.body.comment;
   const userId = req.user.id;
 
-  db.get(`SELECT username FROM users WHERE id = ${userId}`, (err, row) => {
-    const username = row.username;
+  db.get(
+    `SELECT username FROM users WHERE id = ?`,
+    [userId],
+    (err, row) => {
+      const username = row.username;
 
-    const insert = `
-      INSERT INTO feedback (user, comment)
-      VALUES ('${username}', '${comment}')
-    `;
-    db.run(insert, () => {
-      res.json({ success: true });
-    });
-  });
+      db.run(
+        `INSERT INTO feedback (user, comment) VALUES (?, ?)`,
+        [username, comment],
+        () => {
+          res.json({ success: true });
+        }
+      );
+    }
+  );
 });
 
 app.get("/feedback", auth, (req, res) => {
-  db.all("SELECT user, comment FROM feedback ORDER BY id DESC", (err, rows) => {
-    res.json(rows);
-  });
+  db.all(
+    `SELECT user, comment FROM feedback ORDER BY id DESC`,
+    [],
+    (err, rows) => res.json(rows)
+  );
 });
 
 app.post("/change-email", auth, (req, res) => {
@@ -145,13 +168,19 @@ app.post("/change-email", auth, (req, res) => {
 
   if (!newEmail.includes("@")) return res.status(400).json({ error: "Invalid email" });
 
-  const sql = `
-    UPDATE users SET email = '${newEmail}' WHERE id = ${req.user.id}
-  `;
-  db.run(sql, () => {
-    res.json({ success: true, email: newEmail });
-  });
+  db.run(
+    `UPDATE users SET email = ? WHERE id = ?`,
+    [newEmail, req.user.id],
+    () => {
+      res.json({ success: true, email: newEmail });
+    }
+  );
 });
+
+app.listen(4000, () =>
+  console.log("FastBank Version A backend running on http://localhost:4000")
+);
+
 
 app.listen(4000, () =>
   console.log("FastBank Version A backend running on http://localhost:4000")
