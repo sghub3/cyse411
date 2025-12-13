@@ -37,7 +37,7 @@ const sessions = {}; // token -> { userId }
  * Students MUST STOP using this and replace logic with bcrypt.
  */
 function fastHash(password) {
-  return crypto.createHash("sha256").update(password).digest("hex");
+const passwordHash = bcrypt.hashSync("password123", 10);
 }
 
 // Helper: find user by username
