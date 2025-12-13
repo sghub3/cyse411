@@ -1,10 +1,18 @@
-// server.js
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
+const RateLimit = require('express-rate-limit');
 
 const app = express();
+
+const limiter = RateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+});
+
+app.use(limiter);
+
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -12,7 +20,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const BASE_DIR = path.resolve(__dirname, 'files');
 if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR, { recursive: true });
 
-// helper to canonicalize and check
 function resolveSafe(baseDir, userInput) {
   try {
     userInput = decodeURIComponent(userInput);
@@ -20,17 +27,16 @@ function resolveSafe(baseDir, userInput) {
   return path.resolve(baseDir, userInput);
 }
 
-// Secure route
 app.post(
   '/read',
   body('filename')
-    .exists().withMessage('filename required')
+    .exists()
     .bail()
     .isString()
     .trim()
-    .notEmpty().withMessage('filename must not be empty')
+    .notEmpty()
     .custom(value => {
-      if (value.includes('\0')) throw new Error('null byte not allowed');
+      if (value.includes('\0')) throw new Error();
       return true;
     }),
   (req, res) => {
@@ -49,16 +55,14 @@ app.post(
   }
 );
 
-// Vulnerable route (demo)
 app.post('/read-no-validate', (req, res) => {
   const filename = req.body.filename || '';
-  const joined = path.join(BASE_DIR, filename); // intentionally vulnerable
+  const joined = path.join(BASE_DIR, filename);
   if (!fs.existsSync(joined)) return res.status(404).json({ error: 'File not found', path: joined });
   const content = fs.readFileSync(joined, 'utf8');
   res.json({ path: joined, content });
 });
 
-// Helper route for samples
 app.post('/setup-sample', (req, res) => {
   const samples = {
     'hello.txt': 'Hello from safe file!\n',
@@ -73,7 +77,6 @@ app.post('/setup-sample', (req, res) => {
   res.json({ ok: true, base: BASE_DIR });
 });
 
-// Only listen when run directly (not when imported by tests)
 if (require.main === module) {
   const port = process.env.PORT || 4000;
   app.listen(port, () => {
