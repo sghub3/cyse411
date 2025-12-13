@@ -17,6 +17,7 @@ app.use(
 
 app.use(bodyParser.json());
 app.use(cookieParser());
+app.use(csrf());
 
 // --- IN-MEMORY SQLITE DB (clean) ---
 const db = new sqlite3.Database(":memory:");
